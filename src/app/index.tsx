@@ -6,7 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ComicText } from '@/effects/ComicText';
 import { Burst } from '@/effects/shapes';
 import { DIFFICULTIES, DIFFICULTY_ORDER, type DifficultyId } from '@/game/difficulty';
-import { ComicButton } from '@/hud/Results';
+import { ComicButton } from '@/ui/ComicButton';
 import { headTrackingAvailable, useHeadTrackingPermission } from '@/tracking';
 import { Colors, Fonts } from '@/theme';
 

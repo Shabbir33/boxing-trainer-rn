@@ -14,6 +14,25 @@ export const Colors = {
   gold: '#FFC93C',
   neonPink: '#FF2BD6',
   neonViolet: '#5B2BFF',
+
+  // Low-poly arena (sunset palette from the concept art)
+  skyTop: '#2B1E6B',
+  skyViolet: '#5B3FB5',
+  skyPink: '#E0457B',
+  skyOrange: '#FF7A3D',
+  skyGold: '#FFC75A',
+  sun: '#FFE27A',
+  mountainNear: '#4A2F7E',
+  mountainFar: '#7A4FA8',
+  ringBlue: '#2F5BD3',
+  ringLogo: '#4E7CF0',
+  postBlue: '#2747C4',
+  ropeWhite: '#F4F1EA',
+  cuffNavy: '#1F2140',
+  arenaFloor: '#22174A',
+  bleacher: '#2A2060',
+  lampPanel: '#2B2B3D',
+  lamp: '#FFF6D8',
 } as const;
 
 export const Fonts = {

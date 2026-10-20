@@ -23,8 +23,9 @@ import {
 } from '@/effects/Effects';
 import { DIFFICULTIES, type DifficultyId } from '@/game/difficulty';
 import { GameEngine, LIVES, type GameEvent, type RoundStats, type Side } from '@/game/engine';
+import { recordScore } from '@/game/bests';
 import { buzz, initFeedback, playSfx } from '@/game/feedback';
-import { HeadPanel, type TrackingStatus } from '@/hud/HeadPanel';
+import { HeadPanel, LeanMeter, type TrackingStatus } from '@/hud/HeadPanel';
 import { Hud, type HudState } from '@/hud/Hud';
 import { Results } from '@/hud/Results';
 import { Arena } from '@/scene/Arena';
@@ -66,7 +67,7 @@ export default function PlayScreen() {
   const [punchFx, setPunchFx] = useState<PunchFx[]>([]);
   const nextFx = useRef<PunchFx | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
-  const [result, setResult] = useState<{ ko: boolean; stats: RoundStats } | null>(null);
+  const [result, setResult] = useState<{ ko: boolean; stats: RoundStats; newBest: boolean } | null>(null);
   const [hasDodged, setHasDodged] = useState(false);
   const [tracking, setTracking] = useState<TrackingStatus>('searching');
   const [headModel] = useState(() => new HeadModel());
@@ -171,7 +172,7 @@ export default function PlayScreen() {
         }
         case 'over':
           if (!ev.ko) playSfx('bell');
-          setResult({ ko: ev.ko, stats: ev.stats });
+          setResult({ ko: ev.ko, stats: ev.stats, newBest: recordScore(difficulty.id, ev.stats.score).isNewBest });
           break;
       }
     }
@@ -206,6 +207,12 @@ export default function PlayScreen() {
     engine.setHeadTarget(x, now);
     lean.set(x);
   };
+  // Tap mode: the meter mirrors the tap lean, so both control schemes read the same.
+  const onFrame = useRef(() => {});
+  useLayoutEffect(() => {
+    onFrame.current = headMode ? () => {} : () => lean.set(engine.headX);
+  });
+
   const onSample = useRef(handleSample);
   const onCameraError = useRef((error: Error) => {
     console.warn('[head-tracking]', error.message);
@@ -236,9 +243,10 @@ export default function PlayScreen() {
   return (
     <View style={styles.root}>
       <Animated.View style={[StyleSheet.absoluteFill, shakeStyle]}>
-        <Arena engine={engine} onEvents={onEvents} />
+        <Arena engine={engine} onEvents={onEvents} onFrame={onFrame} soften={result !== null} />
 
-        {punchFx.map((fx) => (
+        {/* Effects clear when the results menu opens (it sits over a softened scene). */}
+        {!result && punchFx.map((fx) => (
           <View key={fx.id} pointerEvents="none" style={StyleSheet.absoluteFill}>
             <SplitFlash fire={fx.fire} side={fx.side} width={width} />
             <HitVignette fire={fx.fire} width={width} height={height} />
@@ -280,25 +288,32 @@ export default function PlayScreen() {
           onSample={onSample}
           onError={onCameraError}
           bottomInset={insets.bottom}
+          hidden={result !== null}
         />
       )}
 
-      {!headMode && !hasDodged && countdown === null && !result && (
-        <View pointerEvents="none" style={[styles.hint, { bottom: insets.bottom + 28 }]}>
-          <ComicText size={22}>◀ SLIP</ComicText>
-          <ComicText size={16} color={Colors.whoosh}>
-            TAP AWAY FROM THE PUNCH
-          </ComicText>
-          <ComicText size={22}>SLIP ▶</ComicText>
+      {!headMode && !result && (
+        <View pointerEvents="none" style={[styles.tapPanel, { bottom: insets.bottom + 16 }]}>
+          {!hasDodged && countdown === null && (
+            <View style={styles.hint}>
+              <ComicText size={22}>◀ SLIP</ComicText>
+              <ComicText size={16} color={Colors.whoosh}>
+                TAP AWAY FROM THE PUNCH
+              </ComicText>
+              <ComicText size={22}>SLIP ▶</ComicText>
+            </View>
+          )}
+          <LeanMeter lean={lean} threat={threat} />
         </View>
       )}
 
-      <Hud state={hud} onClose={() => router.back()} />
+      {!result && <Hud state={hud} onClose={() => router.back()} />}
 
       {result && (
         <Results
           ko={result.ko}
           stats={result.stats}
+          newBest={result.newBest}
           total={difficulty.punches}
           onRetry={startRound}
           onMenu={() => router.back()}
@@ -321,10 +336,15 @@ const styles = StyleSheet.create({
   zone: {
     flex: 1,
   },
-  hint: {
+  tapPanel: {
     position: 'absolute',
     left: 16,
     right: 16,
+    alignItems: 'center',
+    gap: 10,
+  },
+  hint: {
+    alignSelf: 'stretch',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',

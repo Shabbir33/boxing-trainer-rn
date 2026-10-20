@@ -135,6 +135,8 @@ export class GameEngine {
   private headTarget = 0;
   private tapHoldUntil = -Infinity;
   private input: 'tap' | 'head' = 'tap';
+  /** Direction of the last tap; it counts until `tapHoldUntil`. */
+  private tapDir: Side | 0 = 0;
   /** Last time a camera sample was on the safe side of the incoming punch. */
   private safeSampleAt = -Infinity;
   /** When the last punch's verdict came in (drives the hit camera kick). */
@@ -189,6 +191,7 @@ export class GameEngine {
   dodge(dir: Side, now: number) {
     if (this.phase === 'over' || this.phase === 'countdown') return;
     this.input = 'tap';
+    this.tapDir = dir;
     this.headTarget = dir;
     this.tapHoldUntil = now + TAP_HOLD_MS;
     // Once a punch is coming, a slip holds through its impact; idle guesses still expire.
@@ -222,8 +225,11 @@ export class GameEngine {
    * for looks, and it would lag a slip that the player can already see on the meter.
    */
   private isSafe(side: Side, impactAt: number) {
+    // Taps are judged at the impact time itself, so a late or dropped frame can't
+    // expire a slip that was still being held when the punch landed.
+    if (this.input === 'tap') return this.tapHoldUntil >= impactAt && this.tapDir * side < 0;
     if (this.headTarget * side <= -SAFE_THRESHOLD) return true;
-    return this.input === 'head' && this.safeSampleAt >= impactAt - HEAD_FLICKER_MS;
+    return this.safeSampleAt >= impactAt - HEAD_FLICKER_MS;
   }
 
   tick(now: number): GameEvent[] {
@@ -292,7 +298,7 @@ export class GameEngine {
           return true;
         }
         this.viaContact = false;
-        events.push(this.resolve(plan, impactAt, true, now));
+        events.push(this.resolve(plan, impactAt, this.isSafe(plan.side, impactAt), now));
         this.enter('recover', impactAt);
         return true;
       }
@@ -357,7 +363,10 @@ export class GameEngine {
     return {
       type: 'hit',
       side: plan.side,
-      wrongWay: lean >= SAFE_THRESHOLD,
+      wrongWay:
+        this.input === 'tap'
+          ? this.tapHoldUntil >= impactAt && this.tapDir * plan.side > 0
+          : lean >= SAFE_THRESHOLD,
       livesLeft: this.lives,
     };
   }

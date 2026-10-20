@@ -12,6 +12,8 @@ import { ComicText } from '@/effects/ComicText';
 import { Heart } from '@/effects/shapes';
 import { LIVES } from '@/game/engine';
 import { Colors } from '@/theme';
+import { ArtPanel } from '@/ui/ArtImage';
+import { ComicArt } from '@/ui/comicArt';
 
 export interface HudState {
   lives: number;
@@ -52,15 +54,14 @@ export function Hud({ state, onClose }: { state: HudState; onClose: () => void }
             ))}
           </View>
         </View>
-        <View style={[styles.side, styles.right]}>
-          <ComicText size={18} color={Colors.whoosh}>
-            SCORE
-          </ComicText>
-          <ComicText size={30}>{String(state.score)}</ComicText>
-        </View>
+        <ArtPanel art={ComicArt.rowTag} style={styles.scoreTag}>
+          <ComicText size={26}>{String(state.score)}</ComicText>
+        </ArtPanel>
       </View>
-      <View pointerEvents="none" style={styles.center}>
-        <ComicText size={44}>{`${state.thrown}/${state.total}`}</ComicText>
+      <View pointerEvents="none" style={[styles.center, { top: insets.top + 6 }]}>
+        <ArtPanel art={ComicArt.rowTag} style={styles.counterTag}>
+          <ComicText size={30}>{`${state.thrown}/${state.total}`}</ComicText>
+        </ArtPanel>
         <ComboBadge combo={state.combo} />
       </View>
     </View>
@@ -83,8 +84,17 @@ const styles = StyleSheet.create({
   side: {
     gap: 8,
   },
-  right: {
-    alignItems: 'flex-end',
+  scoreTag: {
+    width: 112,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  counterTag: {
+    width: 116,
+    height: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   close: {
     alignSelf: 'flex-start',
@@ -95,10 +105,9 @@ const styles = StyleSheet.create({
   },
   center: {
     position: 'absolute',
-    top: '100%',
     left: 0,
     right: 0,
     alignItems: 'center',
-    gap: 2,
+    gap: 4,
   },
 });

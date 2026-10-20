@@ -5,23 +5,30 @@ import { StyleSheet, View } from 'react-native';
 import type { GameEngine, GameEvent } from '@/game/engine';
 import { Colors } from '@/theme';
 import { Glove } from './Glove';
+import { RenderPipeline } from './RenderPipeline';
+import { Scenery } from './Scenery';
 
 const CAMERA_Z = 3.6;
 /** How far the camera slides when the head is fully to one side. */
 const HEAD_TRAVEL = 0.85;
+/** Lights must reach both the sharp (gloves) and soft (background) layers. */
+const ALL_LAYERS = 0xffffffff;
 
 /** Runs the game clock on the render loop so timing and visuals stay in lockstep. */
 function GameLoop({
   engine,
   onEvents,
+  onFrame,
 }: {
   engine: GameEngine | null;
   onEvents: RefObject<(events: GameEvent[]) => void>;
+  onFrame?: RefObject<() => void>;
 }) {
   useFrame(() => {
     if (!engine) return;
     const events = engine.tick(performance.now());
     if (events.length) onEvents.current?.(events);
+    onFrame?.current?.();
   });
   return null;
 }
@@ -45,51 +52,39 @@ function CameraRig({ engine }: { engine: GameEngine | null }) {
   return null;
 }
 
-function Ring() {
-  const ropes: [number, string][] = [
-    [-0.95, Colors.hitRed],
-    [-0.45, Colors.paper],
-    [0.05, Colors.neonViolet],
-  ];
-  return (
-    <group position={[0, 0, -4.5]}>
-      {ropes.map(([y, color]) => (
-        <mesh key={y} position={[0, y, 0]}>
-          <boxGeometry args={[9, 0.05, 0.05]} />
-          <meshBasicMaterial color={color} />
-        </mesh>
-      ))}
-      {[-4.5, 4.5].map((x) => (
-        <mesh key={x} position={[x, -0.6, 0]}>
-          <cylinderGeometry args={[0.09, 0.09, 2, 12]} />
-          <meshBasicMaterial color={Colors.gloveRedDark} />
-        </mesh>
-      ))}
-    </group>
-  );
-}
-
 export const Arena = memo(function Arena({
   engine,
   onEvents,
+  onFrame,
+  soften = false,
 }: {
   engine: GameEngine | null;
   onEvents: RefObject<(events: GameEvent[]) => void>;
+  /** Called after every game tick (e.g. to mirror engine state into the HUD). */
+  onFrame?: RefObject<() => void>;
+  /** Blur and darken the whole scene (a menu is showing over it). */
+  soften?: boolean;
 }) {
   return (
     <View style={StyleSheet.absoluteFill}>
-      <Canvas camera={{ position: [0, 0, CAMERA_Z], fov: 62, near: 0.05, far: 60 }}>
-        <color attach="background" args={[Colors.night]} />
-        <fog attach="fog" args={[Colors.night, 5, 15]} />
-        <ambientLight intensity={1.1} />
-        <directionalLight position={[2, 3, 5]} intensity={2.4} />
-        <directionalLight position={[-3, 1, 2]} intensity={0.6} color={Colors.neonPink} />
+      {/* `flat`: no tone mapping, so the comic palette renders exactly as specified. */}
+      <Canvas flat camera={{ position: [0, 0, CAMERA_Z], fov: 62, near: 0.05, far: 80 }}>
+        <fog attach="fog" args={[Colors.mountainNear, 14, 55]} />
+        {/* Light 0 = key (from the side, so shapes split lit/halftone), light 1 = sunset rim.
+            The comic shader reads them by index. */}
+        <directionalLight position={[4, 4, 2.5]} intensity={2.8} layers-mask={ALL_LAYERS} />
+        <directionalLight
+          position={[-4, 2, -6]}
+          intensity={1.1}
+          color={Colors.skyOrange}
+          layers-mask={ALL_LAYERS}
+        />
 
-        <GameLoop engine={engine} onEvents={onEvents} />
+        <GameLoop engine={engine} onEvents={onEvents} onFrame={onFrame} />
         <CameraRig engine={engine} />
+        <RenderPipeline soften={soften} />
 
-        <gridHelper args={[40, 40, Colors.neonPink, Colors.neonViolet]} position={[0, -1.6, 0]} />
-        <Ring />
+        <Scenery />
         <Glove side={-1} engine={engine} />
         <Glove side={1} engine={engine} />
       </Canvas>

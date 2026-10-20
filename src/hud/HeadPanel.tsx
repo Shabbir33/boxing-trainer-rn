@@ -1,16 +1,15 @@
 import { memo, type RefObject } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import Animated, { useAnimatedStyle, type SharedValue } from 'react-native-reanimated';
 
 import { ComicText } from '@/effects/ComicText';
 import { SAFE_THRESHOLD } from '@/game/engine';
 import { HeadTrackerCamera, type FaceSample } from '@/tracking';
 import { Colors } from '@/theme';
+import { ArtImage } from '@/ui/ArtImage';
+import { ComicArt, LEAN_BAR } from '@/ui/comicArt';
 
 export type TrackingStatus = 'searching' | 'calibrating' | 'tracking' | 'lost' | 'error';
-
-const METER_W = 180;
-const DOT = 16;
 
 const STATUS_TEXT: Record<TrackingStatus, string | null> = {
   searching: 'SHOW YOUR FACE',
@@ -36,9 +35,57 @@ const CameraWindow = memo(function CameraWindow({
   );
 });
 
-const SAFE_ZONE = 'rgba(43,255,136,0.35)';
-const SAFE_ZONE_LIT = 'rgba(43,255,136,0.9)';
-const DANGER_ZONE = 'rgba(255,45,61,0.75)';
+/**
+ * The comic lean meter: the generated gauge with a needle riding its track. The
+ * mapping is piecewise so the engine's safe threshold lands exactly on the art's
+ * green edge. During a punch, the punch-side zone flashes red and the safe side glows.
+ */
+export function LeanMeter({ lean, threat }: { lean: SharedValue<number>; threat: SharedValue<number> }) {
+  const { width } = useWindowDimensions();
+  const w = Math.min(width - 32, 360);
+  const h = w / ComicArt.leanBar.aspect;
+  const left = LEAN_BAR.trackLeft * w;
+  const right = LEAN_BAR.trackRight * w;
+  const center = (left + right) / 2;
+  const half = (right - left) / 2;
+  const edge = LEAN_BAR.safeEdge;
+  const barTop = LEAN_BAR.barTop * h;
+  const barH = (LEAN_BAR.barBottom - LEAN_BAR.barTop) * h;
+  const needleH = barH * 1.9;
+  const needleW = needleH * ComicArt.leanMarker.aspect;
+  const needleTop = LEAN_BAR.centerY * h - needleH / 2;
+  const zoneW = half * (1 - edge);
+
+  const needle = useAnimatedStyle(() => {
+    const l = Math.max(-1, Math.min(1, lean.value));
+    const a = Math.abs(l);
+    const f = a < SAFE_THRESHOLD ? (a / SAFE_THRESHOLD) * edge : edge + ((a - SAFE_THRESHOLD) / (1 - SAFE_THRESHOLD)) * (1 - edge);
+    return { transform: [{ translateX: Math.sign(l) * f * half }] };
+  });
+  const zone = (side: number) => {
+    'worklet';
+    const t = threat.value;
+    if (t === 0) return { opacity: 0 };
+    return t === side
+      ? { opacity: 0.75, backgroundColor: Colors.hitRed }
+      : { opacity: 0.45, backgroundColor: Colors.paper };
+  };
+  const leftZone = useAnimatedStyle(() => zone(-1));
+  const rightZone = useAnimatedStyle(() => zone(1));
+
+  return (
+    <View style={{ width: w, height: h }}>
+      <ArtImage art={ComicArt.leanBar} width={w} />
+      <Animated.View style={[styles.zone, { left: left + 4, top: barTop + 3, width: zoneW - 4, height: barH - 6 }, leftZone]} />
+      <Animated.View
+        style={[styles.zone, { left: center + edge * half, top: barTop + 3, width: zoneW - 4, height: barH - 6 }, rightZone]}
+      />
+      <Animated.View style={[styles.needle, { left: center - needleW / 2, top: needleTop }, needle]}>
+        <ArtImage art={ComicArt.leanMarker} height={needleH} />
+      </Animated.View>
+    </View>
+  );
+}
 
 export function HeadPanel({
   lean,
@@ -47,7 +94,10 @@ export function HeadPanel({
   onSample,
   onError,
   bottomInset,
+  hidden = false,
 }: {
+  /** Hide without unmounting, so the camera keeps running behind menus. */
+  hidden?: boolean;
   lean: SharedValue<number>;
   /** Side the incoming punch lands on, or 0 between punches. */
   threat: SharedValue<number>;
@@ -56,46 +106,17 @@ export function HeadPanel({
   onError: RefObject<(e: Error) => void>;
   bottomInset: number;
 }) {
-  // While a punch is coming, only the far side is green; the punch side turns red.
-  const dotStyle = useAnimatedStyle(() => {
-    const t = threat.value;
-    const away = t === 0 ? Math.abs(lean.value) : -lean.value * t;
-    const color =
-      away >= SAFE_THRESHOLD
-        ? Colors.safeGreen
-        : t !== 0 && away <= -SAFE_THRESHOLD
-          ? Colors.hitRed
-          : Colors.paper;
-    return {
-      transform: [{ translateX: lean.value * (METER_W / 2) }],
-      backgroundColor: color,
-    };
-  });
-  const zoneColor = (zoneSide: number) => {
-    'worklet';
-    const t = threat.value;
-    if (t === 0) return SAFE_ZONE;
-    return t === zoneSide ? DANGER_ZONE : SAFE_ZONE_LIT;
-  };
-  const leftZoneStyle = useAnimatedStyle(() => ({ backgroundColor: zoneColor(-1) }));
-  const rightZoneStyle = useAnimatedStyle(() => ({ backgroundColor: zoneColor(1) }));
   const text = STATUS_TEXT[status];
-  const zone = (METER_W / 2) * (1 - SAFE_THRESHOLD);
 
   return (
-    <View pointerEvents="none" style={[styles.root, { bottom: bottomInset + 16 }]}>
+    <View pointerEvents="none" style={[styles.root, { bottom: bottomInset + 16, opacity: hidden ? 0 : 1 }]}>
       {text && (
         <ComicText size={18} color={status === 'tracking' ? Colors.paper : Colors.gold}>
           {text}
         </ComicText>
       )}
       <CameraWindow onSample={onSample} onError={onError} />
-      <View style={styles.meter}>
-        <Animated.View style={[styles.zone, { left: 0, width: zone }, leftZoneStyle]} />
-        <Animated.View style={[styles.zone, { right: 0, width: zone }, rightZoneStyle]} />
-        <View style={styles.centerTick} />
-        <Animated.View style={[styles.dot, dotStyle]} />
-      </View>
+      <LeanMeter lean={lean} threat={threat} />
     </View>
   );
 }
@@ -117,34 +138,11 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: Colors.nightDeep,
   },
-  meter: {
-    width: METER_W,
-    height: 14,
-    borderRadius: 7,
-    borderWidth: 2,
-    borderColor: Colors.ink,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'visible',
-  },
   zone: {
     position: 'absolute',
-    top: 0,
-    bottom: 0,
+    borderRadius: 3,
   },
-  centerTick: {
+  needle: {
     position: 'absolute',
-    width: 2,
-    top: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(255,255,255,0.6)',
-  },
-  dot: {
-    width: DOT,
-    height: DOT,
-    borderRadius: DOT / 2,
-    borderWidth: 2,
-    borderColor: Colors.ink,
   },
 });

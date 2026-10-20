@@ -14,8 +14,27 @@ import Svg, { Defs, Line, Polyline, RadialGradient, Rect, Stop } from 'react-nat
 
 import type { Side } from '@/game/engine';
 import { Colors } from '@/theme';
+import { ArtImage } from '@/ui/ArtImage';
+import { ComicArt, type Art } from '@/ui/comicArt';
 import { ComicText } from './ComicText';
-import { Burst, seeded, Star } from './shapes';
+import { seeded, Star } from './shapes';
+
+/** Generated comic lettering for each effect word. */
+const WORD_ART: Record<string, Art> = {
+  'POW!': ComicArt.fxPow,
+  'BAM!': ComicArt.fxBam,
+  'WHAM!': ComicArt.fxWham,
+  'SMACK!': ComicArt.fxSmack,
+  'BONK!': ComicArt.fxBonk,
+  'K.O.!': ComicArt.titleKo,
+  'WRONG WAY!': ComicArt.fxWrongWay,
+  'WHOOSH!': ComicArt.fxWhoosh,
+  'SLIP!': ComicArt.fxSlip,
+  'NOPE!': ComicArt.fxNope,
+  'SWISH!': ComicArt.fxSwish,
+  'CLOSE ONE!': ComicArt.fxCloseOne,
+};
+const wordArt = (word: string) => WORD_ART[word] ?? ComicArt.fxPow;
 
 interface Screen {
   width: number;
@@ -156,11 +175,10 @@ export function HitEffect({
   width,
   height,
 }: Screen & { fire: FireValue; side: Side; label: string; ko: boolean; seed: number }) {
-  const size = width * (ko ? 0.95 : 0.74);
-  const cx = width / 2 + side * width * (ko ? 0 : 0.14);
-  const cy = height * 0.42;
-  const tilt = (seed % 21) - 10;
-  const labelSize = size * (ko ? 0.3 : 0.24);
+  const size = width * (ko ? 0.95 : 0.8);
+  const cx = width / 2 + side * width * (ko ? 0 : 0.1);
+  const cy = height * 0.4;
+  const tilt = (seed % 15) - 7;
   const { scale, opacity } = useFiredPop(fire, HIT_CODES, ko ? 1300 : 520);
   const style = useAnimatedStyle(() => ({
     opacity: opacity.value,
@@ -168,31 +186,22 @@ export function HitEffect({
   }));
   const plainLabel = useVariant(fire, Fire.hit);
   const wrongLabel = useVariant(fire, Fire.wrongWay);
+  const plainArt = wordArt(label);
+  const wrongArt = ko ? plainArt : ComicArt.fxWrongWay;
 
   return (
     <>
       <Animated.View
         pointerEvents="none"
-        style={[
-          styles.centered,
-          { left: cx - size / 2, top: cy - size / 2, width: size, height: size },
-          style,
-        ]}>
-        <View style={StyleSheet.absoluteFill}>
-          <Burst size={size} seed={seed} />
-        </View>
-        <Animated.View style={plainLabel}>
-          <ComicText size={labelSize} color={Colors.hitRed}>
-            {label}
-          </ComicText>
+        style={[styles.centered, { left: cx - size / 2, top: cy - size / 2, width: size, height: size }, style]}>
+        <Animated.View style={[styles.overlay, plainLabel]}>
+          <ArtImage art={plainArt} width={size} />
         </Animated.View>
         <Animated.View style={[styles.overlay, wrongLabel]}>
-          <ComicText size={labelSize} color={Colors.hitRed}>
-            {ko ? label : 'WRONG WAY!'}
-          </ComicText>
+          <ArtImage art={wrongArt} width={size} />
         </Animated.View>
       </Animated.View>
-      <DizzyStars fire={fire} cx={cx} cy={cy - size * 0.45} radius={size * 0.3} />
+      <DizzyStars fire={fire} cx={cx} cy={cy - size * 0.38} radius={size * 0.3} />
     </>
   );
 }
@@ -264,14 +273,10 @@ export function DodgeEffect({
           labelStyle,
         ]}>
         <Animated.View style={plainLabel}>
-          <ComicText size={width * 0.15} color={Colors.whoosh}>
-            {label}
-          </ComicText>
+          <ArtImage art={wordArt(label)} width={width * 0.6} />
         </Animated.View>
         <Animated.View style={[styles.overlay, closeLabel]}>
-          <ComicText size={width * 0.13} color={Colors.gold}>
-            CLOSE ONE!
-          </ComicText>
+          <ArtImage art={ComicArt.fxCloseOne} width={width * 0.62} />
         </Animated.View>
       </Animated.View>
     </>
@@ -364,9 +369,11 @@ export function CountdownPop({ value, width }: { value: number; width: number })
   }));
   return (
     <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.centered, style]}>
-      <ComicText size={width * (value === 0 ? 0.26 : 0.36)} color={value === 0 ? Colors.pow : Colors.paper}>
-        {value === 0 ? 'FIGHT!' : String(value)}
-      </ComicText>
+      {value === 0 ? (
+        <ArtImage art={ComicArt.fxFight} width={width * 0.86} />
+      ) : (
+        <ComicText size={width * 0.36}>{String(value)}</ComicText>
+      )}
     </Animated.View>
   );
 }
