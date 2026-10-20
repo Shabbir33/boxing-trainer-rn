@@ -72,6 +72,8 @@ export default function PlayScreen() {
   const [tracking, setTracking] = useState<TrackingStatus>('searching');
   const [headModel] = useState(() => new HeadModel());
   const lastFaceAt = useRef(-Infinity);
+  /** Smoothed time between face results (ms). */
+  const sampleGap = useRef(80);
   const lean = useSharedValue(0);
   /** Side the incoming punch lands on (0 = none); colours the lean meter. */
   const threat = useSharedValue(0);
@@ -195,6 +197,13 @@ export default function PlayScreen() {
         lean.set(0);
       }
       return;
+    }
+    // Faces arrive about once per detection, so their spacing tracks this phone's
+    // detector speed; the camera delay is roughly that plus the capture pipeline.
+    const gap = now - lastFaceAt.current;
+    if (gap > 0 && gap < 400) {
+      sampleGap.current += (gap - sampleGap.current) * 0.1;
+      engine.setHeadLatency(sampleGap.current * 1.4 + 60);
     }
     lastFaceAt.current = now;
     if (engine.phase === 'countdown') {

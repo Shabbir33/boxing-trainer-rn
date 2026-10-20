@@ -1,21 +1,23 @@
 import { useLayoutEffect, useMemo, useRef } from 'react';
-import type { Group } from 'three';
 import {
   BoxGeometry,
-  Shape,
+  CircleGeometry,
   Color,
+  ConeGeometry,
+  CylinderGeometry,
   IcosahedronGeometry,
-  InstancedMesh,
-  Matrix4,
+  PlaneGeometry,
   ShaderMaterial,
-  Vector3,
-  Quaternion,
+  Shape,
+  ShapeGeometry,
+  type BufferGeometry,
+  type Group,
 } from 'three';
 
 import { seeded } from '@/effects/shapes';
 import { Colors } from '@/theme';
 import { makeFlat, makeSurface, outlineMaterial, surfaceUniforms } from './materials';
-import { Part, type Vec3 } from './Part';
+import { groupMatrix, mergeParts, type PartSpec, type Vec3 } from './merge';
 import { BACKGROUND_LAYER } from './RenderPipeline';
 
 /** Canvas height of the ring; everything stands on this. */
@@ -83,38 +85,9 @@ function Sky() {
   );
 }
 
-const inkFlat = makeFlat(Colors.ink);
-
-/** Flat disc with an ink rim. Back-face hulls can't outline open shapes, so draw one behind. */
-function Disc({
-  radius,
-  segments,
-  color,
-  position,
-  rim = 0.1,
-}: {
-  radius: number;
-  segments: number;
-  color: string;
-  position: Vec3;
-  rim?: number;
-}) {
-  const material = useMemo(() => makeFlat(color), [color]);
-  return (
-    <group position={position}>
-      <mesh material={inkFlat} position={[0, 0, -0.01]}>
-        <circleGeometry args={[radius * (1 + rim), segments]} />
-      </mesh>
-      <mesh material={material}>
-        <circleGeometry args={[radius, segments]} />
-      </mesh>
-    </group>
-  );
-}
-
-function Sun() {
-  return <Disc radius={3.2} segments={10} color={Colors.sun} position={[6, 2.2, -32]} rim={0.04} />;
-}
+// ---------------------------------------------------------------------------
+// Everything solid is described as data and baked into a few merged meshes
+// (see merge.ts): the whole arena draws in 4 calls instead of ~130.
 
 const MOUNTAINS: { x: number; z: number; h: number; r: number; near: boolean; turn: number }[] = [
   { x: -14, z: -27, h: 9, r: 7, near: false, turn: 0.3 },
@@ -125,28 +98,6 @@ const MOUNTAINS: { x: number; z: number; h: number; r: number; near: boolean; tu
   { x: 14, z: -24, h: 7, r: 6, near: true, turn: 0.75 },
 ];
 
-function Mountains() {
-  const far = useMemo(() => makeSurface(Colors.mountainFar), []);
-  const near = useMemo(() => makeSurface(Colors.mountainNear), []);
-  return (
-    <>
-      {MOUNTAINS.map((m, i) => (
-        <Part
-          key={i}
-          geometry={<coneGeometry args={[m.r, m.h, 5, 1]} />}
-          material={m.near ? near : far}
-          position={[m.x, FLOOR_Y + m.h / 2 - 1, m.z]}
-          rotation={[0, m.turn, 0]}
-          outline={1.02}
-        />
-      ))}
-    </>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Stands: stepped bleachers with an instanced low-poly crowd.
-
 const STEPS = [
   { z: -7.6, top: -1.15 },
   { z: -8.4, top: -0.6 },
@@ -156,170 +107,13 @@ const STEPS = [
 const SHIRTS = ['#E8262F', '#2F5BD3', '#FFC75A', '#5BC0EB', '#9B5DE5', '#F15BB5', '#F4F1EA', '#FF7A3D'];
 const SKIN = ['#F2C9A0', '#D9A066', '#A86B3C', '#7A4A2A'];
 
-interface Fan {
-  x: number;
-  y: number;
-  z: number;
-  turn: number;
-  shirt: string;
-  skin: string;
-}
-
-function makeCrowd(): Fan[] {
-  const rnd = seeded(77);
-  const fans: Fan[] = [];
-  for (const step of STEPS) {
-    for (let x = -7.5; x <= 7.5; x += 0.52) {
-      if (rnd() < 0.08) continue; // a few empty seats
-      fans.push({
-        x: x + (rnd() - 0.5) * 0.16,
-        y: step.top,
-        z: step.z + (rnd() - 0.5) * 0.12,
-        turn: (rnd() - 0.5) * 0.6,
-        shirt: SHIRTS[Math.floor(rnd() * SHIRTS.length)],
-        skin: SKIN[Math.floor(rnd() * SKIN.length)],
-      });
-    }
-  }
-  return fans;
-}
-
-/** One instanced mesh plus an instanced ink hull, placed from a per-instance transform. */
-function InstancedParts({
-  geometry,
-  color,
-  items,
-  place,
-  hull = 1.1,
-}: {
-  geometry: BoxGeometry | IcosahedronGeometry;
-  color: (i: number) => string;
-  items: number;
-  place: (i: number, pos: Vector3, rot: Quaternion, scale: Vector3) => void;
-  hull?: number;
-}) {
-  const body = useRef<InstancedMesh>(null);
-  const ink = useRef<InstancedMesh>(null);
-  const material = useMemo(() => makeSurface('#FFFFFF'), []);
-
-  useLayoutEffect(() => {
-    const m = new Matrix4();
-    const pos = new Vector3();
-    const rot = new Quaternion();
-    const scale = new Vector3();
-    const c = new Color();
-    for (let i = 0; i < items; i++) {
-      place(i, pos, rot, scale);
-      body.current?.setMatrixAt(i, m.compose(pos, rot, scale));
-      body.current?.setColorAt(i, c.set(color(i)));
-      ink.current?.setMatrixAt(i, m.compose(pos, rot, scale.multiplyScalar(hull)));
-    }
-    for (const mesh of [body.current, ink.current]) {
-      if (!mesh) continue;
-      mesh.instanceMatrix.needsUpdate = true;
-      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
-      mesh.computeBoundingSphere();
-    }
-  }, [items, place, color, hull]);
-
-  return (
-    <>
-      <instancedMesh ref={body} args={[geometry, material, items]} />
-      <instancedMesh ref={ink} args={[geometry, outlineMaterial, items]} />
-    </>
-  );
-}
-
-function Stands() {
-  const bleacher = useMemo(() => makeSurface(Colors.bleacher), []);
-  const fans = useMemo(() => makeCrowd(), []);
-  const bodyGeo = useMemo(() => new BoxGeometry(0.34, 0.44, 0.26), []);
-  const headGeo = useMemo(() => new IcosahedronGeometry(0.14, 0), []);
-  // Dim the crowd toward the bleacher colour so the ring and gloves stay the focus.
-  const shirts = useMemo(
-    () => fans.map((f) => `#${new Color(f.shirt).lerp(new Color(Colors.bleacher), 0.35).getHexString()}`),
-    [fans],
-  );
-
-  return (
-    <>
-      {STEPS.map((s) => {
-        const h = s.top - (FLOOR_Y - 0.2);
-        return (
-          <Part
-            key={s.z}
-            geometry={<boxGeometry args={[18, h, 0.8]} />}
-            material={bleacher}
-            position={[0, FLOOR_Y - 0.2 + h / 2, s.z]}
-            outline={[1, 1.02, 1.04]}
-          />
-        );
-      })}
-      <InstancedParts
-        geometry={bodyGeo}
-        items={fans.length}
-        color={(i) => shirts[i]}
-        place={(i, pos, rot, scale) => {
-          const f = fans[i];
-          pos.set(f.x, f.y + 0.22, f.z);
-          rot.setFromAxisAngle(UP, f.turn);
-          scale.set(1, 1, 1);
-        }}
-      />
-      <InstancedParts
-        geometry={headGeo}
-        items={fans.length}
-        color={(i) => fans[i].skin}
-        place={(i, pos, rot, scale) => {
-          const f = fans[i];
-          pos.set(f.x, f.y + 0.58, f.z);
-          rot.setFromAxisAngle(UP, f.turn * 2);
-          scale.set(1, 1.1, 1);
-        }}
-        hull={1.14}
-      />
-    </>
-  );
-}
-
-const UP = new Vector3(0, 1, 0);
-
-// ---------------------------------------------------------------------------
-// Stadium lights: a pole and a lamp panel on each side.
-
-function LightRig({ side }: { side: -1 | 1 }) {
-  const pole = useMemo(() => makeSurface(Colors.lampPanel), []);
-  const x = side * 3.4;
-  const top = 3.6;
-  const lamps: Vec3[] = [];
-  for (let r = 0; r < 2; r++) for (let c = 0; c < 3; c++) lamps.push([(c - 1) * 0.42, r * 0.42 - 0.21, 0.09]);
-  return (
-    <group position={[x * 1.15, 0, -10.8]}>
-      <Part
-        geometry={<cylinderGeometry args={[0.07, 0.09, top - FLOOR_Y, 6]} />}
-        material={pole}
-        position={[0, (top + FLOOR_Y) / 2, 0]}
-        outline={[1.5, 1, 1.5]}
-      />
-      <group position={[0, top + 0.35, 0]} rotation={[0.18, -side * 0.35, 0]}>
-        <Part geometry={<boxGeometry args={[1.4, 0.95, 0.14]} />} material={pole} outline={1.05} />
-        {lamps.map((p, i) => (
-          <Disc key={i} radius={0.15} segments={8} color={Colors.lamp} position={p} rim={0.18} />
-        ))}
-      </group>
-    </group>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// The ring: canvas, corner posts and three ropes on the back and both sides.
-
 const ROPES: { y: number; color: string }[] = [
   { y: FLOOR_Y + 0.5, color: Colors.ringBlue },
   { y: FLOOR_Y + 0.95, color: Colors.ropeWhite },
   { y: FLOOR_Y + 1.4, color: Colors.gloveRed },
 ];
 const ROPE_HULL: Vec3 = [1.8, 1, 1.8];
+const LIGHT_TOP = 3.6;
 
 /** Five-point star outline, for the logo printed on the canvas. */
 function starShape(outer: number, inner: number) {
@@ -336,92 +130,208 @@ function starShape(outer: number, inner: number) {
   return s;
 }
 
-function Ring() {
-  const star = useMemo(() => starShape(1.1, 0.45), []);
-  const logo = useMemo(() => makeSurface(Colors.ringLogo), []);
-  const canvas = useMemo(() => makeSurface(Colors.ringBlue), []);
-  const floor = useMemo(() => makeSurface(Colors.arenaFloor), []);
-  const post = useMemo(() => makeSurface(Colors.postBlue), []);
-  const pad = useMemo(() => makeSurface(Colors.ropeWhite), []);
-  const ropes = useMemo(() => ROPES.map((r) => makeSurface(r.color)), []);
+/** Dims a crowd colour toward the bleachers so the ring and gloves stay the focus. */
+const dim = (hex: string) => `#${new Color(hex).lerp(new Color(Colors.bleacher), 0.35).getHexString()}`;
+
+/** Light rig transforms: the pole base, and the tilted lamp panel on top of it. */
+function rigMatrix(side: number) {
+  return groupMatrix([side * 3.4 * 1.15, 0, -10.8]);
+}
+function panelMatrix(side: number) {
+  return rigMatrix(side).multiply(groupMatrix([0, LIGHT_TOP + 0.35, 0], [0.18, -side * 0.35, 0]));
+}
+
+/** Solid scenery: mountains, stands and crowd, light poles, ring. */
+function solidParts(): PartSpec[] {
+  const parts: PartSpec[] = [];
+  const cache = new Map<string, BufferGeometry>();
+  const geo = (key: string, make: () => BufferGeometry) => {
+    let g = cache.get(key);
+    if (!g) {
+      g = make();
+      cache.set(key, g);
+    }
+    return g;
+  };
+
+  for (const m of MOUNTAINS) {
+    parts.push({
+      geometry: new ConeGeometry(m.r, m.h, 5, 1),
+      color: m.near ? Colors.mountainNear : Colors.mountainFar,
+      position: [m.x, FLOOR_Y + m.h / 2 - 1, m.z],
+      rotation: [0, m.turn, 0],
+      outline: 1.02,
+    });
+  }
+
+  for (const st of STEPS) {
+    const h = st.top - (FLOOR_Y - 0.2);
+    parts.push({
+      geometry: new BoxGeometry(18, h, 0.8),
+      color: Colors.bleacher,
+      position: [0, FLOOR_Y - 0.2 + h / 2, st.z],
+      outline: [1, 1.02, 1.04],
+    });
+  }
+  const rnd = seeded(77);
+  const body = geo('body', () => new BoxGeometry(0.34, 0.44, 0.26));
+  const head = geo('head', () => new IcosahedronGeometry(0.14, 0));
+  for (const st of STEPS) {
+    for (let x = -7.5; x <= 7.5; x += 0.52) {
+      if (rnd() < 0.08) continue; // a few empty seats
+      const fx = x + (rnd() - 0.5) * 0.16;
+      const fz = st.z + (rnd() - 0.5) * 0.12;
+      const turn = (rnd() - 0.5) * 0.6;
+      const shirt = SHIRTS[Math.floor(rnd() * SHIRTS.length)];
+      const skin = SKIN[Math.floor(rnd() * SKIN.length)];
+      parts.push({
+        geometry: body,
+        color: dim(shirt),
+        position: [fx, st.top + 0.22, fz],
+        rotation: [0, turn, 0],
+        outline: 1.1,
+      });
+      parts.push({
+        geometry: head,
+        color: skin,
+        position: [fx, st.top + 0.58, fz],
+        rotation: [0, turn * 2, 0],
+        scale: [1, 1.1, 1],
+        outline: 1.14,
+      });
+    }
+  }
+
+  for (const side of [-1, 1]) {
+    parts.push({
+      geometry: geo('pole', () => new CylinderGeometry(0.07, 0.09, LIGHT_TOP - FLOOR_Y, 6)),
+      color: Colors.lampPanel,
+      position: [0, (LIGHT_TOP + FLOOR_Y) / 2, 0],
+      outline: [1.5, 1, 1.5],
+      parent: rigMatrix(side),
+    });
+    parts.push({
+      geometry: geo('panel', () => new BoxGeometry(1.4, 0.95, 0.14)),
+      color: Colors.lampPanel,
+      outline: 1.05,
+      parent: panelMatrix(side),
+    });
+  }
+
   const depth = RING_FRONT_Z - RING_BACK_Z;
   const postH = 1.75;
+  parts.push({
+    geometry: new PlaneGeometry(60, 40),
+    color: Colors.arenaFloor,
+    position: [0, FLOOR_Y - 0.21, -6],
+    rotation: [-Math.PI / 2, 0, 0],
+    outline: false,
+  });
+  parts.push({
+    geometry: new BoxGeometry(RING_X * 2 + 0.3, 0.2, depth + 0.3),
+    color: Colors.ringBlue,
+    position: [0, FLOOR_Y - 0.1, (RING_FRONT_Z + RING_BACK_Z) / 2],
+    outline: [1.004, 1.06, 1.002],
+  });
+  parts.push({
+    geometry: new ShapeGeometry(starShape(1.1, 0.45)),
+    color: Colors.ringLogo,
+    position: [0, FLOOR_Y + 0.002, -0.6],
+    rotation: [-Math.PI / 2, 0, 0],
+    outline: false,
+  });
+  for (const side of [-1, 1]) {
+    parts.push({
+      geometry: geo('post', () => new CylinderGeometry(0.09, 0.09, postH, 6)),
+      color: Colors.postBlue,
+      position: [side * RING_X, FLOOR_Y + postH / 2, RING_BACK_Z],
+      outline: [1.4, 1.02, 1.4],
+    });
+    parts.push({
+      geometry: geo('pad', () => new BoxGeometry(0.24, 0.16, 0.24)),
+      color: Colors.ropeWhite,
+      position: [side * RING_X, FLOOR_Y + postH + 0.06, RING_BACK_Z],
+    });
+  }
+  for (const r of ROPES) {
+    parts.push({
+      geometry: geo('ropeBack', () => new CylinderGeometry(0.04, 0.04, RING_X * 2, 6)),
+      color: r.color,
+      position: [0, r.y, RING_BACK_Z],
+      rotation: [0, 0, Math.PI / 2],
+      outline: ROPE_HULL,
+    });
+    for (const side of [-1, 1]) {
+      parts.push({
+        geometry: geo('ropeSide', () => new CylinderGeometry(0.04, 0.04, depth, 6)),
+        color: r.color,
+        position: [side * RING_X, r.y, (RING_FRONT_Z + RING_BACK_Z) / 2],
+        rotation: [Math.PI / 2, 0, 0],
+        outline: ROPE_HULL,
+      });
+    }
+  }
+  return parts;
+}
 
-  return (
-    <>
-      <mesh material={floor} position={[0, FLOOR_Y - 0.21, -6]} rotation={[-Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[60, 40]} />
-      </mesh>
-      {/* Canvas sits on a shallow platform so its edge reads */}
-      <Part
-        geometry={<boxGeometry args={[RING_X * 2 + 0.3, 0.2, depth + 0.3]} />}
-        material={canvas}
-        position={[0, FLOOR_Y - 0.1, (RING_FRONT_Z + RING_BACK_Z) / 2]}
-        outline={[1.004, 1.06, 1.002]}
-      />
-      <mesh material={logo} position={[0, FLOOR_Y + 0.002, -0.6]} rotation={[-Math.PI / 2, 0, 0]}>
-        <shapeGeometry args={[star]} />
-      </mesh>
-      {[-1, 1].map((s) => (
-        <group key={s} position={[s * RING_X, 0, RING_BACK_Z]}>
-          <Part
-            geometry={<cylinderGeometry args={[0.09, 0.09, postH, 6]} />}
-            material={post}
-            position={[0, FLOOR_Y + postH / 2, 0]}
-            outline={[1.4, 1.02, 1.4]}
-          />
-          <Part
-            geometry={<boxGeometry args={[0.24, 0.16, 0.24]} />}
-            material={pad}
-            position={[0, FLOOR_Y + postH + 0.06, 0]}
-          />
-        </group>
-      ))}
-      {ROPES.map((r, i) => (
-        <group key={r.y}>
-          {/* Back rope, post to post */}
-          <Part
-            geometry={<cylinderGeometry args={[0.04, 0.04, RING_X * 2, 6]} />}
-            material={ropes[i]}
-            position={[0, r.y, RING_BACK_Z]}
-            rotation={[0, 0, Math.PI / 2]}
-            outline={ROPE_HULL}
-          />
-          {/* Side ropes running toward the camera */}
-          {[-1, 1].map((s) => (
-            <Part
-              key={s}
-              geometry={<cylinderGeometry args={[0.04, 0.04, depth, 6]} />}
-              material={ropes[i]}
-              position={[s * RING_X, r.y, (RING_FRONT_Z + RING_BACK_Z) / 2]}
-              rotation={[Math.PI / 2, 0, 0]}
-              outline={ROPE_HULL}
-            />
-          ))}
-        </group>
-      ))}
-    </>
-  );
+/**
+ * Unlit discs (sun, stadium lamps), each with an ink rim drawn as a slightly larger
+ * disc behind it, since back-face hulls cannot outline open shapes.
+ */
+function discParts(): PartSpec[] {
+  const parts: PartSpec[] = [];
+  const disc = (
+    radius: number,
+    segments: number,
+    color: string,
+    position: Vec3,
+    rim: number,
+    parent?: PartSpec['parent'],
+  ) => {
+    parts.push({
+      geometry: new CircleGeometry(radius * (1 + rim), segments),
+      color: Colors.ink,
+      position: [position[0], position[1], position[2] - 0.01],
+      outline: false,
+      parent,
+    });
+    parts.push({ geometry: new CircleGeometry(radius, segments), color, position, outline: false, parent });
+  };
+  disc(3.2, 10, Colors.sun, [6, 2.2, -32], 0.04);
+  for (const side of [-1, 1]) {
+    for (let r = 0; r < 2; r++) {
+      for (let c = 0; c < 3; c++) {
+        disc(0.15, 8, Colors.lamp, [(c - 1) * 0.42, r * 0.42 - 0.21, 0.09], 0.18, panelMatrix(side));
+      }
+    }
+  }
+  return parts;
 }
 
 /**
  * Everything around the gloves, on the background layer (rendered soft, see
- * RenderPipeline). Static, so it never re-renders after mount.
+ * RenderPipeline). Static: built once into merged meshes.
  */
 export function Scenery() {
   const root = useRef<Group>(null);
+  const built = useMemo(() => {
+    const solid = mergeParts(solidParts());
+    return {
+      solid,
+      discs: mergeParts(discParts()).surface,
+      surface: makeSurface('#FFFFFF', { vertexColors: true }),
+      flat: makeFlat('#FFFFFF', true),
+    };
+  }, []);
   useLayoutEffect(() => {
     root.current?.traverse((o) => o.layers.set(BACKGROUND_LAYER));
   }, []);
   return (
     <group ref={root}>
       <Sky />
-      <Sun />
-      <Mountains />
-      <Stands />
-      <LightRig side={-1} />
-      <LightRig side={1} />
-      <Ring />
+      <mesh geometry={built.solid.surface} material={built.surface} />
+      <mesh geometry={built.solid.hull} material={outlineMaterial} />
+      <mesh geometry={built.discs} material={built.flat} />
     </group>
   );
 }

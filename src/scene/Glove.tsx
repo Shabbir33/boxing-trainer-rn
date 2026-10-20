@@ -5,8 +5,8 @@ import type { Group } from 'three';
 import { FEINT_MS, RECOVER_MS, type GameEngine, type Side } from '@/game/engine';
 import { Colors } from '@/theme';
 import { makeCuffGeometry, makeMittGeometry, makeThumbGeometry } from './gloveGeometry';
-import { makeSurface } from './materials';
-import { Part } from './Part';
+import { makeSurface, outlineMaterial } from './materials';
+import { mergeParts } from './merge';
 
 /**
  * Guard stance of an orthodox opponent facing the player. Their lead (left) hand is
@@ -163,16 +163,41 @@ function computePose(engine: GameEngine | null, side: Side, now: number, t: numb
   return pose;
 }
 
+/**
+ * The glove's parts baked into one coloured mesh plus one ink hull (two draw calls
+ * instead of twelve). Built once per side: the thumb sits on the inner side.
+ */
+function buildGlove(side: Side) {
+  const inner = -side;
+  const strap = makeCuffGeometry(0.212, 0.205, 0.15);
+  const stripe = makeCuffGeometry(0.216, 0.214, 0.022);
+  return mergeParts([
+    { geometry: makeMittGeometry(), color: Colors.gloveRed, position: [0, 0.06, 0] },
+    // Thumb: rises along the inner side, tip stitched to the knuckle roll.
+    {
+      geometry: makeThumbGeometry(),
+      color: Colors.gloveRed,
+      position: [inner * 0.25, 0.08, -0.03],
+      rotation: [-0.3, 0, inner * 0.28],
+      outline: 1.1,
+    },
+    {
+      geometry: makeCuffGeometry(0.2, 0.185, 0.4),
+      color: Colors.gloveRed,
+      position: [0, -0.42, -0.02],
+      outline: [1.07, 1.01, 1.07],
+    },
+    // Navy wrist strap with white piping.
+    { geometry: strap, color: Colors.cuffNavy, position: [0, -0.39, -0.02], outline: [1.05, 1.02, 1.05] },
+    { geometry: stripe, color: Colors.cuffWhite, position: [0, -0.325, -0.02], outline: false },
+    { geometry: stripe, color: Colors.cuffWhite, position: [0, -0.455, -0.02], outline: false },
+  ]);
+}
+
 export function Glove({ side, engine }: { side: Side; engine: GameEngine | null }) {
   const group = useRef<Group>(null);
-  const body = useMemo(() => makeSurface(Colors.gloveRed, { gloss: true }), []);
-  const band = useMemo(() => makeSurface(Colors.cuffWhite), []);
-  const strap = useMemo(() => makeSurface(Colors.cuffNavy), []);
-  const mitt = useMemo(() => makeMittGeometry(), []);
-  const thumb = useMemo(() => makeThumbGeometry(), []);
-  const cuff = useMemo(() => makeCuffGeometry(0.2, 0.185, 0.4), []);
-  const strapGeo = useMemo(() => makeCuffGeometry(0.212, 0.205, 0.15), []);
-  const stripe = useMemo(() => makeCuffGeometry(0.216, 0.214, 0.022), []);
+  const body = useMemo(() => makeSurface('#FFFFFF', { gloss: true, vertexColors: true }), []);
+  const mesh = useMemo(() => buildGlove(side), [side]);
 
   useFrame((state) => {
     const g = group.current;
@@ -188,25 +213,10 @@ export function Glove({ side, engine }: { side: Side; engine: GameEngine | null 
     body.emissive.setRGB(pose.glow * 0.3, pose.glow * 0.2, 0);
   });
 
-  // Thumb on the inner side (toward the centre of the screen).
-  const inner = -side;
-
   return (
     <group ref={group}>
-      <Part geometry={mitt} material={body} position={[0, 0.06, 0]} />
-      {/* Thumb: rises along the inner side, tip stitched to the knuckle roll */}
-      <Part
-        geometry={thumb}
-        material={body}
-        position={[inner * 0.25, 0.08, -0.03]}
-        rotation={[-0.3, 0, inner * 0.28]}
-        outline={1.1}
-      />
-      <Part geometry={cuff} material={body} position={[0, -0.42, -0.02]} outline={[1.07, 1.01, 1.07]} />
-      {/* Navy wrist strap with white piping */}
-      <Part geometry={strapGeo} material={strap} position={[0, -0.39, -0.02]} outline={[1.05, 1.02, 1.05]} />
-      <Part geometry={stripe} material={band} position={[0, -0.325, -0.02]} outline={false} />
-      <Part geometry={stripe} material={band} position={[0, -0.455, -0.02]} outline={false} />
+      <mesh geometry={mesh.surface} material={body} />
+      <mesh geometry={mesh.hull} material={outlineMaterial} />
     </group>
   );
 }

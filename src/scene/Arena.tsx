@@ -68,7 +68,12 @@ export const Arena = memo(function Arena({
   return (
     <View style={StyleSheet.absoluteFill}>
       {/* `flat`: no tone mapping, so the comic palette renders exactly as specified. */}
-      <Canvas flat camera={{ position: [0, 0, CAMERA_Z], fov: 62, near: 0.05, far: 80 }}>
+      {/* No MSAA: at phone pixel ratios it is costly on every GPU tier, and the ink
+          outlines already hide jaggies. */}
+      <Canvas
+        flat
+        gl={{ antialias: false, powerPreference: 'high-performance' }}
+        camera={{ position: [0, 0, CAMERA_Z], fov: 62, near: 0.05, far: 80 }}>
         <fog attach="fog" args={[Colors.mountainNear, 14, 55]} />
         {/* Light 0 = key (from the side, so shapes split lit/halftone), light 1 = sunset rim.
             The comic shader reads them by index. */}

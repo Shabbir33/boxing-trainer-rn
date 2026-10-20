@@ -1,0 +1,59 @@
+diff --git a/node_modules/react-native-vision-camera-face-detector/android/src/main/java/com/margelo/nitro/camera/facedetector/HybridFaceDetectorOutput.kt b/node_modules/react-native-vision-camera-face-detector/android/src/main/java/com/margelo/nitro/camera/facedetector/HybridFaceDetectorOutput.kt
+index c94014f..99c51d2 100644
+--- a/node_modules/react-native-vision-camera-face-detector/android/src/main/java/com/margelo/nitro/camera/facedetector/HybridFaceDetectorOutput.kt
++++ b/node_modules/react-native-vision-camera-face-detector/android/src/main/java/com/margelo/nitro/camera/facedetector/HybridFaceDetectorOutput.kt
+@@ -51,7 +51,9 @@ class HybridFaceDetectorOutput(
+   private val faceDetectorTask = AtomicReference<Task<List<Face>>?>()
+   private val executor = Executors.newSingleThreadExecutor()
+   private var imageAnalysis: ImageAnalysis? = null
+-  private val recommendedResolutionForFaceDetection = Size(1280, 720)
++  // Patched (boxing-trainer): ML Kit "fast" mode only needs a large face; 640x480 roughly
++  // halves detection time, which is most of the head-tracking delay on mid/low-end phones.
++  private val recommendedResolutionForFaceDetection = Size(640, 480)
+ 
+   override fun createUseCase(
+     mirrorMode: MirrorMode,
+@@ -70,7 +72,7 @@ class HybridFaceDetectorOutput(
+       ResolutionSelector
+         .Builder()
+         .setResolutionStrategy(resolutionStrategy)
+-        .setAllowedResolutionMode(ResolutionSelector.PREFER_HIGHER_RESOLUTION_OVER_CAPTURE_RATE)
++        .setAllowedResolutionMode(ResolutionSelector.PREFER_CAPTURE_RATE_OVER_HIGHER_RESOLUTION)
+         .build()
+     val imageAnalysis =
+       ImageAnalysis
+@@ -140,15 +142,17 @@ class HybridFaceDetectorOutput(
+       val task = faceDetector.process(inputImage)
+       faceDetectorTask.set(task)
+       
+-      task.addOnSuccessListener { faces ->
++      // Patched: deliver on the analysis executor instead of the main thread, so results
++      // don't queue behind UI work on their way to JS.
++      task.addOnSuccessListener(executor) { faces ->
+         val hybridFaces =
+           faces
+             .map { HybridFace(it, config) }
+             .toTypedArray<HybridFaceSpec>()
+         options.onFacesDetected(hybridFaces)
+-      }.addOnFailureListener { error ->
++      }.addOnFailureListener(executor) { error ->
+         options.onError(error)
+-      }.addOnCompleteListener {
++      }.addOnCompleteListener(executor) {
+         imageProxy.close()
+         faceDetectorTask.set(null)
+         isBusy.set(false)
+diff --git a/node_modules/react-native-vision-camera-face-detector/ios/HybridFaceDetectorOutput.swift b/node_modules/react-native-vision-camera-face-detector/ios/HybridFaceDetectorOutput.swift
+index f382ee4..0068dcc 100644
+--- a/node_modules/react-native-vision-camera-face-detector/ios/HybridFaceDetectorOutput.swift
++++ b/node_modules/react-native-vision-camera-face-detector/ios/HybridFaceDetectorOutput.swift
+@@ -30,7 +30,8 @@ NativeCameraOutput {
+   }
+   var targetResolution: ResolutionRule {
+     return .closestTo(
+-      Size(width: 720.0, height: 1280.0)
++      // Patched (boxing-trainer): smaller buffers detect faster; plenty for a close face.
++      Size(width: 480.0, height: 640.0)
+     )
+   }
+   private let faceDetector: FaceDetector

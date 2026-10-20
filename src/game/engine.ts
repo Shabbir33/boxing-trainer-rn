@@ -68,10 +68,12 @@ const CLOSE_CALL_MS = 160;
 /** Head easing time constant; keeps tap dodges snappy but not instant. */
 const HEAD_TAU_MS = 45;
 /**
- * Camera samples reach JS roughly this long after the frame was captured
- * (sensor + ML Kit + bridge). The verdict waits this long for a late slip to show up.
+ * Camera samples reach JS some time after the frame was captured (sensor + ML Kit +
+ * bridge). The verdict waits that long for a late slip to show up. It depends on the
+ * phone, so the play screen measures it (`setHeadLatency`); this is the starting guess.
  */
 export const HEAD_LATENCY_MS = 170;
+const HEAD_LATENCY_RANGE: [min: number, max: number] = [90, 220];
 /** A safe camera sample this soon before impact still counts (rides out detector jitter). */
 const HEAD_FLICKER_MS = 90;
 const MAX_SAME_SIDE = 3;
@@ -139,6 +141,8 @@ export class GameEngine {
   private tapDir: Side | 0 = 0;
   /** Last time a camera sample was on the safe side of the incoming punch. */
   private safeSampleAt = -Infinity;
+  /** Current estimate of camera delay (see HEAD_LATENCY_MS). */
+  private headLatencyMs = HEAD_LATENCY_MS;
   /** When the last punch's verdict came in (drives the hit camera kick). */
   resolvedAt = -Infinity;
   /**
@@ -218,6 +222,11 @@ export class GameEngine {
     const incoming =
       this.phase === 'windup' || this.phase === 'strike' || this.phase === 'contact';
     if (plan && incoming && clamped * plan.side <= -SAFE_THRESHOLD) this.safeSampleAt = now;
+  }
+
+  /** Updates the camera-delay estimate used to wait for late slips (clamped). */
+  setHeadLatency(ms: number) {
+    this.headLatencyMs = Math.max(HEAD_LATENCY_RANGE[0], Math.min(HEAD_LATENCY_RANGE[1], ms));
   }
 
   /**
@@ -306,9 +315,9 @@ export class GameEngine {
         if (!plan) return false;
         const impactAt = this.phaseStart;
         const safe = this.isSafe(plan.side, impactAt);
-        if (!safe && elapsed < HEAD_LATENCY_MS) return false;
+        if (!safe && elapsed < this.headLatencyMs) return false;
         this.viaContact = true;
-        events.push(this.resolve(plan, impactAt, safe, Math.min(now, impactAt + HEAD_LATENCY_MS)));
+        events.push(this.resolve(plan, impactAt, safe, Math.min(now, impactAt + this.headLatencyMs)));
         // The glove never stopped, so the recovery is timed from impact.
         this.enter('recover', impactAt);
         return true;

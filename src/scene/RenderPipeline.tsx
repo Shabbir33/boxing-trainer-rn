@@ -19,8 +19,20 @@ import { surfaceUniforms } from './materials';
 
 /** Layer for everything behind the gloves; rendered soft. Gloves stay on layer 0. */
 export const BACKGROUND_LAYER = 1;
-/** Background renders at this fraction of screen resolution (also cheaper). */
-const BG_SCALE = 0.5;
+/**
+ * Quality tiers, picked at runtime from measured frame time (see `useFrame` below).
+ * The background is the only full-screen 3D work, so it is what scales: its render
+ * resolution, and whether the composite does a 9-tap blur or relies on the bilinear
+ * upscale (which is already soft at low resolution).
+ */
+const TIERS = [
+  { bgScale: 0.34, blur: false }, // low
+  { bgScale: 0.42, blur: true }, // mid
+  { bgScale: 0.5, blur: true }, // high
+];
+/** Frames slower than this (ms, smoothed) for `DOWNGRADE_AFTER_S` step quality down. */
+const SLOW_FRAME_MS = 19.5;
+const DOWNGRADE_AFTER_S = 1.0;
 /** Blur radius in density-independent pixels: a gentle depth-of-field, not a smear. */
 const BLUR_DP = 1.6;
 /** Sunset haze mixed into the background so the gloves pop forward. */
@@ -52,9 +64,14 @@ uniform vec3 uHaze;
 uniform float uHazeAmt;
 uniform vec3 uDark;
 uniform float uDarken;
+uniform float uBlur;
 varying vec2 vUv;
 void main() {
-  vec3 c = texture2D(tBg, vUv).rgb * 0.25;
+  vec3 c;
+  if (uBlur < 0.5) {
+    c = texture2D(tBg, vUv).rgb;
+  } else {
+  c = texture2D(tBg, vUv).rgb * 0.25;
   c += texture2D(tBg, vUv + vec2(uStep.x, 0.0)).rgb * 0.125;
   c += texture2D(tBg, vUv - vec2(uStep.x, 0.0)).rgb * 0.125;
   c += texture2D(tBg, vUv + vec2(0.0, uStep.y)).rgb * 0.125;
@@ -63,6 +80,7 @@ void main() {
   c += texture2D(tBg, vUv - uStep).rgb * 0.0625;
   c += texture2D(tBg, vUv + vec2(uStep.x, -uStep.y)).rgb * 0.0625;
   c += texture2D(tBg, vUv + vec2(-uStep.x, uStep.y)).rgb * 0.0625;
+  }
   float grey = dot(c, vec3(0.299, 0.587, 0.114));
   c = mix(c, vec3(grey), 0.12);
   c = mix(c, uHaze, uHazeAmt);
@@ -111,6 +129,7 @@ function createPipeline(): Pipeline {
       uHazeAmt: { value: HAZE },
       uDark: { value: new Color(Colors.nightDeep) },
       uDarken: { value: 0 },
+      uBlur: { value: 1 },
     },
   });
   const scene = new Scene();
@@ -139,6 +158,9 @@ export function RenderPipeline({ soften = false }: { soften?: boolean }) {
   const size = useThree((s) => s.size);
   const dpr = useThree((s) => s.viewport.dpr);
   const mix = useRef(0);
+  // Adaptive quality: start high, step down while frames stay slow. Never steps back
+  // up, so the picture doesn't pump; the countdown absorbs the first adjustments.
+  const perf = useRef({ tier: TIERS.length - 1, avgMs: 16.7, slowFor: 0 });
 
   // GPU resources live in a ref: they're mutated every frame, outside React.
   const pipe = useRef<Pipeline | null>(null);
@@ -151,14 +173,30 @@ export function RenderPipeline({ soften = false }: { soften?: boolean }) {
 
   useFrame(({ gl: renderer, scene, camera }, delta) => {
     const { targets, composite } = pipe.current!;
+    // Count draw calls across all passes of the frame (dev stats, e.g. `__renderInfo`).
+    renderer.info.autoReset = false;
+    renderer.info.reset();
+    if (__DEV__) (globalThis as { __renderInfo?: unknown }).__renderInfo = renderer.info;
+
     // Clears are explicit below; the passes must not wipe each other.
     renderer.autoClear = false;
     renderer.setClearColor(CLEAR, 1);
 
+    const p = perf.current;
+    const ms = Math.min(100, delta * 1000);
+    p.avgMs += (ms - p.avgMs) * 0.1;
+    p.slowFor = p.avgMs > SLOW_FRAME_MS ? p.slowFor + delta : 0;
+    if (p.slowFor > DOWNGRADE_AFTER_S && p.tier > 0) {
+      p.tier--;
+      p.slowFor = 0;
+      if (__DEV__) console.log(`[render] quality tier -> ${p.tier} (avg ${p.avgMs.toFixed(1)} ms)`);
+    }
+    const tier = TIERS[p.tier];
+
     mix.current = Math.min(1, Math.max(0, mix.current + (soften ? delta : -delta) / SOFT_FADE_S));
     const m = mix.current;
     const soft = m > 0.001;
-    const scale = soft ? SOFT_SCALE : BG_SCALE;
+    const scale = soft ? SOFT_SCALE : tier.bgScale;
     const [a, b] = targets;
     fitTarget(a, size.width * dpr * scale, size.height * dpr * scale);
     const u = composite.material.uniforms;
@@ -179,6 +217,7 @@ export function RenderPipeline({ soften = false }: { soften?: boolean }) {
       u.tBg.value = a.texture;
       u.uHazeAmt.value = 0;
       u.uDarken.value = 0;
+      u.uBlur.value = 1;
       renderer.setRenderTarget(b);
       renderPass(renderer, composite.scene, composite.camera);
 
@@ -196,6 +235,7 @@ export function RenderPipeline({ soften = false }: { soften?: boolean }) {
     u.tBg.value = a.texture;
     u.uHazeAmt.value = HAZE;
     u.uDarken.value = 0;
+    u.uBlur.value = tier.blur ? 1 : 0;
     renderer.setRenderTarget(null);
     renderer.clear();
     renderPass(renderer, composite.scene, composite.camera);

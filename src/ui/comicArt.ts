@@ -33,6 +33,21 @@ import labelDodged from '@/assets/ui/comic/label_dodged.webp';
 import labelBestCombo from '@/assets/ui/comic/label_best_combo.webp';
 import labelCloseCalls from '@/assets/ui/comic/label_close_calls.webp';
 import labelAvgReaction from '@/assets/ui/comic/label_avg_reaction.webp';
+import menuGloves from '@/assets/ui/comic/menu_gloves.webp';
+import menuTitle from '@/assets/ui/comic/menu_title.webp';
+import btnFight from '@/assets/ui/comic/btn_fight.webp';
+import chipEasy from '@/assets/ui/comic/chip_easy.webp';
+import chipNormal from '@/assets/ui/comic/chip_normal.webp';
+import chipHard from '@/assets/ui/comic/chip_hard.webp';
+import chipPro from '@/assets/ui/comic/chip_pro.webp';
+import chipEasyOn from '@/assets/ui/comic/chip_easy_on.webp';
+import chipNormalOn from '@/assets/ui/comic/chip_normal_on.webp';
+import chipHardOn from '@/assets/ui/comic/chip_hard_on.webp';
+import chipProOn from '@/assets/ui/comic/chip_pro_on.webp';
+import controlsLabel from '@/assets/ui/comic/controls_label.webp';
+import toggleHead from '@/assets/ui/comic/toggle_head.webp';
+import toggleTap from '@/assets/ui/comic/toggle_tap.webp';
+import menuBg from '@/assets/ui/comic/menu_bg.webp';
 
 export interface Art {
   source: ImageSourcePropType;
@@ -73,6 +88,21 @@ export const ComicArt = {
   labelBestCombo: { source: labelBestCombo, aspect: 800 / 266 },
   labelCloseCalls: { source: labelCloseCalls, aspect: 800 / 250 },
   labelAvgReaction: { source: labelAvgReaction, aspect: 800 / 237 },
+  menuGloves: { source: menuGloves, aspect: 1000 / 775 },
+  menuTitle: { source: menuTitle, aspect: 1000 / 588 },
+  btnFight: { source: btnFight, aspect: 1000 / 325 },
+  chipEasy: { source: chipEasy, aspect: 420 / 232 },
+  chipNormal: { source: chipNormal, aspect: 420 / 228 },
+  chipHard: { source: chipHard, aspect: 420 / 225 },
+  chipPro: { source: chipPro, aspect: 420 / 233 },
+  chipEasyOn: { source: chipEasyOn, aspect: 520 / 311 },
+  chipNormalOn: { source: chipNormalOn, aspect: 520 / 279 },
+  chipHardOn: { source: chipHardOn, aspect: 520 / 271 },
+  chipProOn: { source: chipProOn, aspect: 520 / 303 },
+  controlsLabel: { source: controlsLabel, aspect: 700 / 155 },
+  toggleHead: { source: toggleHead, aspect: 800 / 241 },
+  toggleTap: { source: toggleTap, aspect: 800 / 243 },
+  menuBg: { source: menuBg, aspect: 752 / 1344 },
 } satisfies Record<string, Art>;
 
 /**

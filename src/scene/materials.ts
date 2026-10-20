@@ -67,19 +67,22 @@ function addComicShading(shader: WebGLProgramParametersWithUniforms) {
 }
 
 /** Flat-faceted surface with comic print shading; used for everything solid. */
-export function makeSurface(color: string, { gloss = false }: { gloss?: boolean } = {}) {
-  const m = new MeshToonMaterial({ color });
+export function makeSurface(
+  color: string,
+  { gloss = false, vertexColors = false }: { gloss?: boolean; vertexColors?: boolean } = {},
+) {
+  const m = new MeshToonMaterial({ color, vertexColors });
   // Toon materials don't declare `flatShading`, but the renderer honours it on any material.
   (m as MeshToonMaterial & { flatShading: boolean }).flatShading = true;
   if (gloss) m.defines = { COMIC_GLOSS: '' };
   m.onBeforeCompile = addComicShading;
-  m.customProgramCacheKey = () => (gloss ? 'comic-gloss' : 'comic');
+  m.customProgramCacheKey = () => `comic${gloss ? '-gloss' : ''}${vertexColors ? '-vc' : ''}`;
   return m;
 }
 
-/** Unlit flat colour for lamps and the sun. */
-export function makeFlat(color: string) {
-  return new MeshBasicMaterial({ color, fog: false });
+/** Unlit flat colour for lamps and the sun (vertex-coloured when merged). */
+export function makeFlat(color: string, vertexColors = false) {
+  return new MeshBasicMaterial({ color, fog: false, vertexColors });
 }
 
 /** Rendered on an enlarged back-face copy of each part to draw an ink outline. */
