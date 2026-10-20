@@ -41,3 +41,6 @@ example
 # generated native folders
 /ios
 /android
+
+# reference material (third-party video, kept local)
+reference-vid.mp4
